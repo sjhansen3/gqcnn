@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Copyright ©2017. The Regents of the University of California (Regents). All Rights Reserved.
@@ -63,7 +64,7 @@ if __name__ == '__main__':
     state_path = os.path.join(test_case_path, 'state')
     action_path = os.path.join(test_case_path, 'action')
     state = RgbdImageState.load(state_path)
-    action = ParallelJawGrasp.load(action_path)
+    # action = ParallelJawGrasp.load(action_path)
 
     if policy_config['vis']['input']:
         vis.figure()
