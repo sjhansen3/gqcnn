@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Copyright ©2017. The Regents of the University of California (Regents). All Rights Reserved.
@@ -27,6 +28,7 @@ Author: Vishal Satish
 import rospy
 import time
 import perception
+import logging
 
 from cv_bridge import CvBridge, CvBridgeError
 
@@ -143,7 +145,7 @@ class GraspPlanner(object):
 
         # create an RGBDImageState with the cropped RGBDImage and CameraIntrinsics
         image_state = RgbdImageState(cropped_rgbd_image, cropped_camera_intrinsics)
-  
+
         # execute policy
         try:
             return self.execute_policy(image_state, self.grasping_policy, self.grasp_pose_publisher, cropped_camera_intrinsics.frame)
@@ -195,7 +197,7 @@ class GraspPlanner(object):
 if __name__ == '__main__':
     
     # initialize the ROS node
-    rospy.init_node('Grasp_Sampler_Server')
+    rospy.init_node('Grasp_Sampler_Server', log_level=rospy.DEBUG)
 
     # initialize cv_bridge
     cv_bridge = CvBridge()
