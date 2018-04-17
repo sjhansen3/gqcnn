@@ -281,33 +281,12 @@ class AntipodalDepthImageGraspSampler(ImageGraspSampler):
         # compute edge pixels
         edge_start = time()
         depth_im = rgbd_im.depth
-        if visualize:
-            vis.figure()
-            vis.subplot(2,3,1)
-            vis.imshow(depth_im)
-            vis.title("(1) Raw input depth image")
-
         depth_im = depth_im.apply(snf.gaussian_filter,
                                   sigma=self._depth_grad_gaussian_sigma)
-        if visualize:
-            vis.subplot(2,3,2)
-            vis.imshow(depth_im)
-            vis.title("(2) Post Gauss Blur with sigma= {}".format(self._depth_grad_gaussian_sigma))
-
         depth_im_downsampled = depth_im.resize(self._rescale_factor)
-        
-        if visualize:
-            vis.subplot(2,3,3)
-            vis.imshow(depth_im_downsampled)
-            vis.title("(3) depth image downsampled by rescale factor {}".format(self._rescale_factor))
 
-        # print("is depth_im_downsampled finite line 295 image_grasp_sampler.py", np.all(np.isfinite(depth_im_downsampled.data)) )
         depth_im_threshed = depth_im_downsampled.threshold_gradients(self._depth_grad_thresh)
-        if visualize:
-            vis.subplot(2,3,4)
-            vis.imshow(depth_im_threshed)
-            vis.title("(4) gradients with threshold {}".format(self._depth_grad_thresh))
-
+    
         edge_pixels = self._downsample_rate * depth_im_threshed.zero_pixels()
         if segmask is not None:
             edge_pixels = np.array([p for p in edge_pixels if np.any(segmask[p[0], p[1]] > 0)])
