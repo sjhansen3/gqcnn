@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from math import sqrt, atan2, ceil
 
 from autolab_core import RigidTransform, YamlConfig, Point
+import autolab_core.utils as utils
+
 
 from gqcnn import RgbdImageState, ParallelJawGrasp
 from gqcnn import Grasp2D
@@ -24,33 +26,100 @@ class ProcessCornellData:
     def __init__(self, cfg):
         self._cfg = cfg
 
-    def save_tensor(self, idx, color_image_tensor, pose_tensor, label_tensor):
+    def preprocess_grasp(self, idx, is_positive_example=True, visualize=False):
+        """ preprocess a given image from the cornell dataset
+        """
+        grasps, img = self._load_cornell_data(idx, is_positive_example, visualize)
+        if len(grasps) == 0:
+            logging.error("No valid grasps found for image {}".format(idx))
+            return False
+
+        image_tensor, pose_tensor = self._grasps_to_tensors(grasps, img)
+        
+        if is_positive_example:
+            label_tensor = np.ones([len(grasps)])
+        else:
+            label_tensor = np.zeros([len(grasps)])
+
+        if self._cfg['vis_preprocess']:
+            k = len(grasps)
+            if k > self._cfg['vis_max']:
+                k = self._cfg['vis_max']
+            d = utils.sqrt_ceil(k)
+
+            # display grasp transformed images
+            vis.figure(size=(FIGSIZE,FIGSIZE))
+            for i in range(k):
+                image_tf = image_tensor[i,...]
+                grasp = grasps[i]
+                depth = pose_tensor[i]
+                label = label_tensor[i]
+
+                vis.subplot(k,2,2*i+1)
+                vis.imshow(img)
+                vis.grasp(grasp, scale=1.5, show_center=False, show_axis=True)
+                vis.title('Grasp %d: d=%.3f, label=%s' %(i, depth, label))
+                
+                vis.subplot(k,2,2*i+2)
+                vis.imshow(ColorImage(image_tf))
+                vis.title('TF image %d: d=%.3f, label=%s' %(i, depth, label))
+
+        vis.show()
+        if is_positive_example:
+            ident = "{}pos".format(idx)
+        else:
+            ident = "{}neg".format(idx)
+        self._save_tensor(ident, image_tensor, pose_tensor, label_tensor)
+
+    def load_preprocessed_grasps(self, ident, visualize=True):
+        """ load a set of image crops which have already been preprocessed and saved
+        params
+        ---
+        idx: the index of the image as labeled by the cornell dataset
+        Returns
+        ---
+        color_image_tensor: the color of the image
+        pose_tensor: The depth with which to grab the object (N,1)
+        label_tensor: whether or not the labels are positive or negative
+        """
+        #TODO get list of names, dont depend on them being in order or formatted
+        directory = self._cfg["dataset_dir"]
+        
+        color_filename = os.path.join(directory, ImageFileTemplates.color_im_tf_tensor_template+ident+".npz")
+        pose_filename = os.path.join(directory, ImageFileTemplates.hand_poses_template+ident+".npz")
+        label_filename = os.path.join(directory, self._cfg["target_metric_name"]+ident+".npz")
+        
+        color_image_tensor = np.load(color_filename)['arr_0']
+        pose_tensor = np.load(pose_filename)['arr_0']
+        label_tensor = np.load(label_filename)['arr_0']
+        
+        return color_image_tensor, pose_tensor, label_tensor
+
+    def _save_tensor(self, ident, color_image_tensor, pose_tensor, label_tensor):
         """ save a tensor to the dataset directory
         Params
         ---
         idx: the index of the image as labeled in the cornell directory (starts at 100)
-        color_image_tensor: a numpy array ()
+        color_image_tensor: a stack of numpy array's for each image
         pose_tensor: a numpy array representing the depth of each labeled gras (1,N)
-
         """
-        idx-=100
         directory = self._cfg["dataset_dir"]
         
-        color_filename = os.path.join(directory, ImageFileTemplates.color_im_tf_tensor_template+str(idx))
-        pose_filename = os.path.join(directory, ImageFileTemplates.hand_poses_template+str(idx))
-        label_filename = os.path.join(directory, self._cfg["target_metric_name"]+str(idx))
+        color_filename = os.path.join(directory, ImageFileTemplates.color_im_tf_tensor_template+ident)
+        pose_filename = os.path.join(directory, ImageFileTemplates.hand_poses_template+ident)
+        label_filename = os.path.join(directory, self._cfg["target_metric_name"]+ident)
         
-        print "saving color image to file: "
-        print color_filename
-        print pose_filename
-        print label_filename
+        logging.debug("saving color image to file: ")
+        logging.debug(color_filename)
+        logging.debug(pose_filename)
+        logging.debug(label_filename)
         
         np.savez_compressed(color_filename, color_image_tensor)
         np.savez_compressed(pose_filename, pose_tensor)
         np.savez_compressed(label_filename, label_tensor)
 
-    def load(self, idx, is_positive_example):
-        """ class to load the data from the cornell dataset
+    def _load_cornell_data(self, idx, is_positive_example, visualize):
+        """ class to load a set of grasps associated with a single image from the cornell dataset
         Params
         ---
         idx: the suffix index of the cornell grasping image (starts at 100)
@@ -58,15 +127,17 @@ class ProcessCornellData:
         Returns
         ---
         grasps: A list of autolab_core Grasp2D objects
-        img
+        img: the full image from the cornell dataset
         """
         directory = self._cfg['raw_data_dir']
         if idx<10:
             file_name = "pcd000{}r".format(idx)
         elif idx<100:
             file_name = "pcd00{}r".format(idx)
-        else:
+        elif idx<1000:
             file_name = "pcd0{}r".format(idx)
+        else:
+            file_name = "pcd{}r".format(idx)
 
         if is_positive_example:
             last= 'cpos.txt'
@@ -74,11 +145,20 @@ class ProcessCornellData:
             last= 'cneg.txt'
         
         #read the image
-        img= plt.imread(directory + file_name +'.png')
+        logging.debug("directory name {}".format(directory + file_name +'.png'))
+        try:
+            img= plt.imread(directory + file_name +'.png')
+
+        except IOError as e:
+            logging.warn(e)
+            return [], []
+
         img = img*255
         img = img.astype('uint8')
+        if img.shape[2] > 3:
+            img = img[:,:,0:3]
         
-        #print "image_shape{}".format(img.shape)
+
         img = ColorImage(img, frame='camera')  
         with open(directory+file_name[:-1]+last) as f:
             text = f.read()
@@ -95,79 +175,70 @@ class ProcessCornellData:
         x3 = A[:,6]
         y3 = A[:,7]
 
-        vis.imshow(img)
+        if visualize:
+            vis.figure()
+            vis.imshow(img)
+
         grasps = []
+
+        #set the camera intrinsics so the grasp passes through as pixels. Kinda hacky
         intr = CameraIntrinsics('camera', fx=1, fy=1, cx=0, cy=0, width=640, height=480)
+        
+        #loop through all boxes which a human labeled
         for i in range(len(y3)-1):        
             #calculate the center point of the line
-            center = np.array([(x[i]+x3[i])/2,(y[i]+y3[i])/2])
+            center_1 = np.array([(x[i]+x3[i])/2,(y[i]+y3[i])/2])
+            center_2 = np.array([(x1[i]+x2[i])/2,(y1[i]+y2[i])/2])
+
             grip_width_px = sqrt((x[i]-x3[i])**2+(y[i]-y3[i])**2)
             angle = atan2((y3[i]-y[i]),(x3[i]-x[i]))
-    
-            center_point = Point(center, frame='camera')
-            grasp = Grasp2D(center_point,angle,depth=1,width=grip_width_px,camera_intr=intr)
+            
+            if is_infinite(grip_width_px) or is_infinite(center_1) or is_infinite(center_2) or is_infinite(angle):
+                logging.warn("Skipping grasp {} of picture {} for nan or inf value".format(i, idx))
+                logging.warn("x[i], {} x3[i], {} y[i], {} y3[i], {}".format(x[i], x3[i], y[i], y3[i]))
+                continue
 
-            grasps.append(grasp)
+            num_samples = self._cfg['num_samples']
+            multiples = np.arange(0,num_samples)/float(num_samples)
+            for i_sample in range(num_samples):
+                center = center_1+(center_2-center_1)*multiples[i_sample]
+                center_point = Point(center, frame='camera')
+                grasp = Grasp2D(center_point,angle,depth=1,width=grip_width_px,camera_intr=intr)
+                grasps.append(grasp)
+                if visualize:
+                    vis.grasp(grasp)
+                    
+                    #show the human labeled box
+                    vis.plot([x1[i], x2[i]], [y1[i],y2[i]], 'r')
+                    vis.plot([x2[i], x3[i]], [y2[i],y3[i]], 'b')
+                    vis.plot([x[i], x3[i]], [y[i], y3[i]], 'r')
+                    vis.plot([x[i], x1[i]], [y[i], y1[i]], 'b')
+
         return grasps, img
 
-    def view(self, image_tensor, pose_tensor):
+    def _view_generated_tensors(self, image_tensor, pose_tensor, label_tensor):
         """ view the image and pose tensor
         """
-        k = len(grasps)
-        d = int(ceil(sqrt((k))))
+        k = len(pose_tensor[0])
+        if k > self._cfg[vis_max]:
+            k = self._cfg[vis_max]
+        d = utils.sqrt_ceil(k)
 
         # display grasp transformed images
         vis.figure(size=(FIGSIZE,FIGSIZE))
-        for i, image_tf in enumerate(image_tensor[:k,...]):
-            depth = 1
-            vis.subplot(d,d,i+1)
-            vis.imshow(ColorImage(image_tf))
-            vis.title('Image %d: d=%.3f' %(i, depth))
-
-        # display grasp transformed images
-        vis.figure(size=(FIGSIZE,FIGSIZE))
-        for i in range(1,k):
+        for i in range(k):
             image_tf = image_tensor[i,...]
-            depth = 1
-            grasp = grasps[i]
-
-            vis.subplot(d,2,2*i+1)
-            vis.imshow(img)
-            vis.grasp(grasp, scale=1.5, show_center=False, show_axis=True)
-            vis.title('Grasp %d: d=%.3f' %(i, depth))
+            depth = pose_tensor[i]
+            label = label_tensor[i]
             
-            vis.subplot(d,2,2*i+2)
+            vis.subplot(d,d,i)
             vis.imshow(ColorImage(image_tf))
-            vis.title('TF image %d: d=%.3f' %(i, depth))
+            vis.title('TF image %d: d=%.3f, label=%s' %(i, depth, label))
 
-    def view_hand_labels(self, A, img):
-        """ Plot the image and hand labels
-        Params
-        ---
-        A: The loaded matrix of labels from the text file
-        img: The imag where the labels came from 
-        """
-        x2 = A[:,0]
-        y2 = A[:,1]
-        x1 = A[:,2]
-        y1 = A[:,3]
-        x = A[:,4]
-        y = A[:,5]
-        x3 = A[:,6]
-        y3 = A[:,7]
+        vis.show()
 
-        plt.figure()
-        plt.imshow(img)
-        for i in range(len(y3)-1):
-            #show the box that was labeled by a human
-            #blue indicates the locations of the gripper
-            plt.plot([x1[i], x2[i]], [y1[i],y2[i]], 'r')
-            plt.plot([x2[i], x3[i]], [y2[i],y3[i]], 'b')
-            plt.plot([x[i], x3[i]], [y[i], y3[i]], 'r')
-            plt.plot([x[i], x1[i]], [y[i], y1[i]], 'b')
-
-    def grasps_to_tensors(self, grasps, image):
-        """ Convert an image and grasps to tensors for training
+    def _grasps_to_tensors(self, grasps, image):
+        """ Convert a set of grasps and single image to image and pose tensors for training
         Params
         ---
         grasps: a list of Grasp2D objects
@@ -190,7 +261,7 @@ class ProcessCornellData:
         pose_tensor = np.zeros([num_grasps, gqcnn_pose_dim])
 
         for i, grasp in enumerate(grasps):
-            scale = float(gqcnn_im_height) / (2*grasp.width)
+            scale = float(gqcnn_im_height) / (2*grasp.width+1e-6)
             im_scaled = image.resize(scale)
             translation = scale * np.array([image.center[0] - grasp.center.data[1],
                                             image.center[1] - grasp.center.data[0]])
@@ -207,48 +278,12 @@ class ProcessCornellData:
                 raise ValueError('Input data mode %s not supported' %(input_data_mode))
         return image_tensor, pose_tensor
 
-    def load_and_view(self, idx, is_positive_example):
-        """ load, convert and view the pose tensor
-        Params
-        ---
-        idx: the index of the image
-        is_positive_example: whether or not the grasp is labeled as success or failure
-        """
-        grasps, img = self.load(idx, is_positive_example)
-
-        plt.figure()
-        image_tensor, pose_tensor = self.grasps_to_tensors(grasps, img)
-        self.view(image_tensor, pose_tensor)
-
-    def load_tensor(self, idx):
-        """ load a set of image crops which have already been preprocessed and saved
-        params
-        ---
-        idx: the index of the image as labeled by the cornell dataset
-        Returns
-        ---
-        color_image_tensor: the color of the image
-        pose_tensor: The depth with which to grab the object
-        label_tensor: whether or not the labels are positive or negative
-        """
-        idx-=100
-        directory = self._cfg["dataset_dir"]
-        
-        color_filename = os.path.join(directory, ImageFileTemplates.color_im_tf_tensor_template+str(idx)+".npz")
-        pose_filename = os.path.join(directory, ImageFileTemplates.hand_poses_template+str(idx)+".npz")
-        label_filename = os.path.join(directory, self._cfg["target_metric_name"]+str(idx)+".npz")
-        
-        print color_filename+".npz"
-        print pose_filename+".npz"
-        print label_filename+".npz"
-        
-        color_image_tensor = np.load(color_filename)['arr_0']
-        pose_tensor = np.load(pose_filename)['arr_0']
-        label_tensor = np.load(label_filename)['arr_0']
-        
-        return color_image_tensor, pose_tensor, label_tensor
+def is_infinite(num):
+    return np.any(np.isinf(num)) or np.any(np.isnan(num))
 
 if __name__=="__main__":
+    # set up logger
+    logging.getLogger().setLevel(logging.INFO)
 
     # parse args
     parser = argparse.ArgumentParser(description='Load human grasp labels from the cornell dataset')
@@ -263,28 +298,30 @@ if __name__=="__main__":
 
     #configuration file for loading dataset directory
     cfg = YamlConfig(config_filename)
+    data_processor = ProcessCornellData(cfg)
 
     if action=='save':
         #save the configuration for future debugging and use
         stored_config_path = os.path.join(cfg["dataset_dir"],"configuration_settings")
         cfg.save(stored_config_path)
 
-        data_processor = ProcessCornellData(cfg)
+        min_index = cfg['min_image_idx']
+        max_index = cfg['max_image_idx']
 
-        #generate and save the tensors
-        for idx in range(102,104):
-            grasps, img = data_processor.load(idx, is_positive_example=True)
-            image_tensor, pose_tensor = data_processor.grasps_to_tensors(grasps, img)
-            label_tensor_positive = np.zeros([len(grasps)])
-            data_processor.save_tensor(idx, image_tensor, pose_tensor, label_tensor_positive)
+        #process the cornell data and save the tensors to file for training
+        for idx in range(min_index, max_index):
+            data_processor.preprocess_grasp(idx, is_positive_example=False, visualize=False)
+            data_processor.preprocess_grasp(idx, is_positive_example=True, visualize=False)
+
+    
     elif action =='load':
-        # load the tensors
-        idx = 109
-        color_image_tensor, pose_tensor, label_tensor = load_tensor(cfg, idx)
-        print color_image_tensor.shape
+        #load the processed and saved tensors which have been saved for training
+        color_image_tensor, pose_tensor, label_tensor = data_processor.load_preprocessed_grasps(idx)
+        print "the shape of the loaded color_image tensor: {}".format(color_image_tensor.shape)
         length = len(color_image_tensor[:,0,0,0])
         d = int(ceil(sqrt(length)))
         for i in range(1,length):
             plt.subplot(d,d,i)
             print color_image_tensor[i,...].shape
             plt.imshow(color_image_tensor[i,...])
+        plt.show()
