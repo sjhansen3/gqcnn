@@ -255,8 +255,7 @@ class GQCNN(object):
                 fc5_std = np.sqrt(2.0 / (self.fc5_in_size))
                 self._weights.fc5W = tf.Variable(tf.truncated_normal([self.fc5_in_size, self.fc5_out_size], stddev=fc5_std))
                 self._weights.fc5b = tf.Variable(tf.constant(0.0, shape=[self.fc5_out_size]))
-    
-    def init_weights_gaussian(self):
+        def init_weights_gaussian(self):
         """ Initializes weights for network from scratch using Gaussian Distribution """
 
         # init pool size variables
@@ -1008,11 +1007,10 @@ class GQCNNColor:
         if training_mode == TrainingMode.CLASSIFICATION:
             gqcnn.initialize_network(add_softmax=True)
         elif training_mode == TrainingMode.REGRESSION:
-            gqcnn.initialize_network()
+            gqcnn.initialize_network()  #TODO check this - the weights are initialized using random vars when initialize_netowrk is called
         else:
             raise ValueError('Invalid training mode: {}'.format(training_mode))
-        gqcnn.init_mean_and_std(model_dir)
-
+        gqcnn.init_mean_and_std(model_dir) #TODO does this load the model weights? if so initializing randomly should be okay? 
         return gqcnn
 
     def get_tf_graph(self):
@@ -1135,6 +1133,10 @@ class GQCNNColor:
         reinit_pc1 : bool
             whether to re-initiazlize pc1
         """
+
+        """ Initializes weights for network from scratch using Gaussian Distribution 
+        """
+        pass
         with self._graph.as_default():
             if reinit_pc1:
                 pc1_std = np.sqrt(2.0 / self.pc1_in_size)
@@ -1159,93 +1161,7 @@ class GQCNNColor:
     
     def init_weights_gaussian(self):
         """ Initializes weights for network from scratch using Gaussian Distribution """
-        #TODO initialize these weights in the karas way
-        # init pool size variables
-        cfg = self._architecture
-        layer_height = self._im_height
-        layer_width = self._im_width
-        layer_channels = self._num_channels
-
-        # fc3
-        fc3_in_size = conv2_2_size
-        if use_conv3:
-            fc3_in_size = conv3_2_size
-        fc3_out_size = cfg['fc3']['out_size']
-        fc3_std = np.sqrt(2.0 / fc3_in_size)
-        fc3W = tf.Variable(tf.truncated_normal([fc3_in_size, fc3_out_size], stddev=fc3_std), name='fc3W')
-        fc3b = tf.Variable(tf.truncated_normal([fc3_out_size], stddev=fc3_std), name='fc3b')
-
-        # pc1
-        pc1_in_size = self._pose_dim
-        pc1_out_size = cfg['pc1']['out_size']
-
-        pc1_std = np.sqrt(2.0 / pc1_in_size)
-        pc1W = tf.Variable(tf.truncated_normal([pc1_in_size, pc1_out_size],
-                                               stddev=pc1_std), name='pc1W')
-        pc1b = tf.Variable(tf.truncated_normal([pc1_out_size],
-                                               stddev=pc1_std), name='pc1b')
-
-        # pc2
-        pc2_in_size = pc1_out_size
-        pc2_out_size = cfg['pc2']['out_size']
-
-        if pc2_out_size > 0:
-            pc2_std = np.sqrt(2.0 / pc2_in_size)
-            pc2W = tf.Variable(tf.truncated_normal([pc2_in_size, pc2_out_size],
-                                                   stddev=pc2_std), name='pc2W')
-            pc2b = tf.Variable(tf.truncated_normal([pc2_out_size],
-                                                   stddev=pc2_std), name='pc2b')
-
-        # fc4
-        fc4_im_in_size = fc3_out_size
-        if pc2_out_size == 0:
-            fc4_pose_in_size = pc1_out_size
-        else:
-            fc4_pose_in_size = pc2_out_size
-        fc4_out_size = cfg['fc4']['out_size']
-        fc4_std = np.sqrt(2.0 / (fc4_im_in_size + fc4_pose_in_size))
-        fc4W_im = tf.Variable(tf.truncated_normal([fc4_im_in_size, fc4_out_size], stddev=fc4_std), name='fc4W_im')
-        fc4W_pose = tf.Variable(tf.truncated_normal([fc4_pose_in_size, fc4_out_size], stddev=fc4_std), name='fc4W_pose')
-        fc4b = tf.Variable(tf.truncated_normal([fc4_out_size], stddev=fc4_std), name='fc4b')
-
-        # fc5
-        fc5_in_size = fc4_out_size
-        fc5_out_size = cfg['fc5']['out_size']
-        fc5_std = np.sqrt(2.0 / (fc5_in_size))
-        fc5W = tf.Variable(tf.truncated_normal([fc5_in_size, fc5_out_size], stddev=fc5_std), name='fc5W')
-        fc5b = tf.Variable(tf.constant(0.0, shape=[fc5_out_size]), name='fc5b')
-
-        # create empty weight object and fill it up
-        self._weights = GQCnnWeights()
-
-        self._weights.conv1_1W = conv1_1W
-        self._weights.conv1_1b = conv1_1b
-        self._weights.conv1_2W = conv1_2W
-        self._weights.conv1_2b = conv1_2b
-        self._weights.conv2_1W = conv2_1W
-        self._weights.conv2_1b = conv2_1b
-        self._weights.conv2_2W = conv2_2W
-        self._weights.conv2_2b = conv2_2b
-        
-        if use_conv3:
-            self._weights.conv3_1W = conv3_1W
-            self._weights.conv3_1b = conv3_1b
-            self._weights.conv3_2W = conv3_2W
-            self._weights.conv3_2b = conv3_2b
-
-        self._weights.fc3W = fc3W
-        self._weights.fc3b = fc3b
-        self._weights.fc4W_im = fc4W_im
-        self._weights.fc4W_pose = fc4W_pose
-        self._weights.fc4b = fc4b
-        self._weights.fc5W = fc5W
-        self._weights.fc5b = fc5b
-        self._weights.pc1W = pc1W
-        self._weights.pc1b = pc1b
-
-        if pc2_out_size > 0:
-            self._weights.pc2W = pc2W
-            self._weights.pc2b = pc2b
+        #TODO check assumption, the weights are automatically intiialized as gaussian in 
 
     def _parse_config(self, config):
         """ Parses configuration file for this GQCNN 
@@ -1613,36 +1529,61 @@ class GQCNNColor:
             pooling=None,
             classes=1000
         )
-        base_model.trainable = False
-        for layer in base_model.layers:
-            layer.trainable = False
-            # print layer.trainable_variables
-            # print layer.trainable_variables
+        # base_model.trainable = False
+        # for layer in base_model.layers:
+        #     layer.trainable = False
+        #     # print layer.trainable_variables
+        #     # print layer.trainable_variables
         
-        #TODO the pose should probaly get jammed in here somewhere
         # add a global spatial average pooling layer
         base_out = base_model(input_im_node)
-        x = tf.keras.layers.GlobalAveragePooling2D()(base_out)
-        # Fully connected layer 1
-        x = tf.keras.layers.Dense(1024, kernel_initializer='glorot_normal',activation='relu')(x)
-        # Fully connected layer 2
-        x = tf.keras.layers.Dense(1024, kernel_initializer='glorot_normal',activation='relu')(x)
+        base_out_num_nodes = reduce_shape(base_out.get_shape())
 
-        # Fully connected layer 3
-        x = tf.keras.layers.Dense(1024, kernel_initializer='glorot_normal', activation='relu')(x)
+        #TODO define num_nodes for base_out
+        base_out_flat = tf.reshape(base_out, [-1, base_out_num_nodes])
+
+        # fc3
+        fc3 = tf.nn.relu(tf.matmul(base_out_flat, self._weights.fc3W) +
+                        self._weights.fc3b)
+
+        # drop fc3 if necessary
         if drop_fc3:
-            x = tf.keras.layers.Dropout(fc3_drop_rate)(x)
+                fc3 = tf.nn.dropout(fc3, fc3_drop_rate)
 
-        # Fully connected layer 4
-        x = tf.keras.layers.Dense(1024, kernel_initializer='glorot_normal', activation='relu')(x)
+        # pc1
+        pc1 = tf.nn.relu(tf.matmul(input_pose_node, self._weights.pc1W) +
+                        self._weights.pc1b)
+
+        #This is where the pose gets put in
+        if self._use_pc2:
+                # pc2
+                pc2 = tf.nn.relu(tf.matmul(pc1, self._weights.pc2W) +
+                                self._weights.pc2b)
+                # fc4
+                fc4 = tf.nn.relu(tf.matmul(fc3, self._weights.fc4W_im) +
+                                tf.matmul(pc2, self._weights.fc4W_pose) +
+                                self._weights.fc4b)
+        else:
+                # fc4
+                fc4 = tf.nn.relu(tf.matmul(fc3, self._weights.fc4W_im) +
+                                tf.matmul(pc1, self._weights.fc4W_pose) +
+                                self._weights.fc4b)
+
+        # drop fc4 if necessary
         if drop_fc4:
-            x = tf.keras.layers.Dropout(fc4_drop_rate)(x)
-        return x
+                fc4 = tf.nn.dropout(fc4, fc4_drop_rate)
+
+        # fc5
+        fc5 = tf.matmul(fc4, self._weights.fc5W) + self._weights.fc5b
 
         #TODO remove dead code
+        """
         # add binary output layer
         preds = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', activation='sigmoid')(x)
         return preds
         #binary label outputs
         labels = tf.placeholder(tf.float32, shape=(None, 1))
         loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(y_pred=preds, y_true=labels))
+        """
+
+        return fc5
