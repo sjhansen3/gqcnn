@@ -1,7 +1,7 @@
 ### TRAINING CONFIGURATIONS ###
 # dataset 
-dataset_dir: /path/to/your/dataset
-output_dir: /path/to/output/trained/models
+dataset_dir: /Users/stephenhansen/Code/dexnet_dataset/adv_synth
+output_dir: /Users/stephenhansen/Code/dexnet_dataset/trained_model
 model_dir: /path/to/your/pretrained/gqcnn/model
 
 # general optimization parameters
