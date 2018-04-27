@@ -12,7 +12,6 @@ from math import sqrt, atan2, ceil
 from autolab_core import RigidTransform, YamlConfig, Point
 import autolab_core.utils as utils
 
-
 from gqcnn import RgbdImageState, ParallelJawGrasp
 from gqcnn import Grasp2D
 from gqcnn import CrossEntropyAntipodalGraspingPolicy, AntipodalDepthImageGraspSampler
@@ -26,13 +25,13 @@ class ProcessCornellData:
     def __init__(self, cfg):
         self._cfg = cfg
 
-    def preprocess_grasp(self, idx, is_positive_example=True, visualize=False):
+    def preprocess_grasp(self, filename, is_positive_example=True):
         """ preprocess a given image from the cornell dataset
         """
-        grasps, img = self._load_cornell_data(idx, is_positive_example, visualize)
+        grasps, img = self._load_cornell_data(filename, is_positive_example)
         if len(grasps) == 0:
-            logging.error("No valid grasps found for image {}".format(idx))
-            return False
+            logging.error("No valid grasps found for image {}".format(filename))
+            return False, False, False
 
         image_tensor, pose_tensor = self._grasps_to_tensors(grasps, img)
         
@@ -65,13 +64,9 @@ class ProcessCornellData:
                 vis.title('TF image %d: d=%.3f, label=%s' %(i, depth, label))
 
         vis.show()
-        if is_positive_example:
-            ident = "{}pos".format(idx)
-        else:
-            ident = "{}neg".format(idx)
-        self._save_tensor(ident, image_tensor, pose_tensor, label_tensor)
+        return image_tensor, pose_tensor, label_tensor 
 
-    def load_preprocessed_grasps(self, ident, visualize=True):
+    def load_preprocessed_grasps(self, ident):
         """ load a set of image crops which have already been preprocessed and saved
         params
         ---
@@ -95,7 +90,7 @@ class ProcessCornellData:
         
         return color_image_tensor, pose_tensor, label_tensor
 
-    def _save_tensor(self, ident, color_image_tensor, pose_tensor, label_tensor):
+    def save_tensor(self, ident, color_image_tensor, pose_tensor, label_tensor):
         """ save a tensor to the dataset directory
         Params
         ---
@@ -118,11 +113,11 @@ class ProcessCornellData:
         np.savez_compressed(pose_filename, pose_tensor)
         np.savez_compressed(label_filename, label_tensor)
 
-    def _load_cornell_data(self, idx, is_positive_example, visualize):
+    def _load_cornell_data(self, file_name, is_positive_example):
         """ class to load a set of grasps associated with a single image from the cornell dataset
         Params
         ---
-        idx: the suffix index of the cornell grasping image (starts at 100)
+        file_name: the name of the image file
         is_positive_example: whether or not the example is labeled as a successful grasp or not
         Returns
         ---
@@ -130,24 +125,15 @@ class ProcessCornellData:
         img: the full image from the cornell dataset
         """
         directory = self._cfg['raw_data_dir']
-        if idx<10:
-            file_name = "pcd000{}r".format(idx)
-        elif idx<100:
-            file_name = "pcd00{}r".format(idx)
-        elif idx<1000:
-            file_name = "pcd0{}r".format(idx)
-        else:
-            file_name = "pcd{}r".format(idx)
-
         if is_positive_example:
             last= 'cpos.txt'
         else: 
             last= 'cneg.txt'
         
         #read the image
-        logging.debug("directory name {}".format(directory + file_name +'.png'))
+        logging.debug("directory name {}".format(directory + file_name))
         try:
-            img= plt.imread(directory + file_name +'.png')
+            img= plt.imread(directory + file_name)
 
         except IOError as e:
             logging.warn(e)
@@ -160,7 +146,7 @@ class ProcessCornellData:
         
 
         img = ColorImage(img, frame='camera')  
-        with open(directory+file_name[:-1]+last) as f:
+        with open(directory+file_name[:-5]+last) as f:
             text = f.read()
             
         A = np.fromstring(text, sep=' ')
@@ -175,7 +161,7 @@ class ProcessCornellData:
         x3 = A[:,6]
         y3 = A[:,7]
 
-        if visualize:
+        if self._cfg['vis_preprocess']:
             vis.figure()
             vis.imshow(img)
 
@@ -194,7 +180,7 @@ class ProcessCornellData:
             angle = atan2((y3[i]-y[i]),(x3[i]-x[i]))
             
             if is_infinite(grip_width_px) or is_infinite(center_1) or is_infinite(center_2) or is_infinite(angle):
-                logging.warn("Skipping grasp {} of picture {} for nan or inf value".format(i, idx))
+                logging.warn("Skipping grasp {} of picture {} for nan or inf value".format(i, file_name))
                 logging.warn("x[i], {} x3[i], {} y[i], {} y3[i], {}".format(x[i], x3[i], y[i], y3[i]))
                 continue
 
@@ -205,7 +191,7 @@ class ProcessCornellData:
                 center_point = Point(center, frame='camera')
                 grasp = Grasp2D(center_point,angle,depth=1,width=grip_width_px,camera_intr=intr)
                 grasps.append(grasp)
-                if visualize:
+                if self._cfg['vis_preprocess']:
                     vis.grasp(grasp)
                     
                     #show the human labeled box
@@ -220,8 +206,8 @@ class ProcessCornellData:
         """ view the image and pose tensor
         """
         k = len(pose_tensor[0])
-        if k > self._cfg[vis_max]:
-            k = self._cfg[vis_max]
+        if k > self._cfg['vis_max']:
+            k = self._cfg['vis_max']
         d = utils.sqrt_ceil(k)
 
         # display grasp transformed images
@@ -305,13 +291,61 @@ if __name__=="__main__":
         stored_config_path = os.path.join(cfg["dataset_dir"],"configuration_settings")
         cfg.save(stored_config_path)
 
-        min_index = cfg['min_image_idx']
-        max_index = cfg['max_image_idx']
-
         #process the cornell data and save the tensors to file for training
-        for idx in range(min_index, max_index):
-            data_processor.preprocess_grasp(idx, is_positive_example=False, visualize=False)
-            data_processor.preprocess_grasp(idx, is_positive_example=True, visualize=False)
+        image_tensors = []#np.zeros((1000,64,64,3))
+        pose_tensors = []#np.zeros((1000,7))
+        label_tensors = []#np.zeros((1000,))
+
+        all_filenames = os.listdir(cfg['raw_data_dir'])
+
+        im_filenames = [f for f in all_filenames if f.find(".png") > -1]
+        im_filenames = im_filenames
+        for idx, filename in enumerate(im_filenames):
+            img_tensor1, pose_tensor1, label_tensor1 = data_processor.preprocess_grasp(filename, is_positive_example=False)
+            if np.all(img_tensor1):
+                print "shape of img_tensor1 {}".format(img_tensor1.shape)
+                # print "shape of pose_tensor1 {}".format(pose_tensor1.shape)
+                # print "shape of label_tensor1 {}".format(label_tensor1.shape)
+                image_tensors.append(img_tensor1)
+                pose_tensors.append(pose_tensor1)
+                label_tensors.append(label_tensor1)
+
+            img_tensor2, pose_tensor2, label_tensor2 = data_processor.preprocess_grasp(filename, is_positive_example=True)
+            if np.all(img_tensor2):
+                print "shape of img_tensor2 {}".format(img_tensor2.shape)
+                # print "shape of pose_tensor2 {}".format(pose_tensor2.shape)
+                # print "shape of label_tensor2 {}".format(label_tensor2.shape)
+
+                image_tensors.append(img_tensor2)
+                pose_tensors.append(pose_tensor2)
+                label_tensors.append(label_tensor2)
+
+        # for tensor in label_tensors:
+        #     print "tensor shape {}".format(tensor.shape)
+
+        # import pdb; pdb.set_trace()
+        image_tensors = np.vstack(image_tensors)
+        pose_tensors = np.vstack(pose_tensors)
+        pose_tensors = np.hstack([np.zeros((len(pose_tensors), 2)), pose_tensors, np.zeros((len(pose_tensors), 4))])
+        label_tensors = np.hstack(label_tensors)
+
+        print "shape of the final image tensor {}".format(image_tensors.shape)
+        print "shape of the pose tensor {}".format(pose_tensors.shape)
+        print "label tensor final shape {}".format(label_tensors.shape)
+
+        N = int(ceil(len(image_tensors)/1000.0))
+        image_tensors = np.array_split(image_tensors, N)
+        pose_tensors = np.array_split(pose_tensors, N)
+        label_tensors = np.array_split(label_tensors, N)
+
+        for i, (img_tensor, pose_tensor, lbl_tensor) in enumerate(zip(image_tensors, pose_tensors, label_tensors)):
+            ident = str(i).zfill(4)
+            print "identity {}".format(ident)
+            print "shape of img_tensor {}".format(img_tensor.shape)
+            print "shape of pose_tensor {}".format(pose_tensor.shape)
+            print "shape of lbl_tensor {}".format(lbl_tensor.shape)
+
+            data_processor.save_tensor(ident, img_tensor, pose_tensor, lbl_tensor)
 
     
     elif action =='load':
