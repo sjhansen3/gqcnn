@@ -339,7 +339,7 @@ if __name__=="__main__":
         label_tensors = np.array_split(label_tensors, N)
 
         for i, (img_tensor, pose_tensor, lbl_tensor) in enumerate(zip(image_tensors, pose_tensors, label_tensors)):
-            ident = str(i).zfill(4)
+            ident = str(i).zfill(5)
             print "identity {}".format(ident)
             print "shape of img_tensor {}".format(img_tensor.shape)
             print "shape of pose_tensor {}".format(pose_tensor.shape)
