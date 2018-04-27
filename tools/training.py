@@ -265,11 +265,11 @@ import time
 import os
 
 from autolab_core import YamlConfig
-from gqcnn import GQCNN, SGDOptimizer, GQCNNAnalyzer
+from gqcnn import GQCNN, SGDOptimizer, GQCNNAnalyzer, GQCNNColor
 
 if __name__ == '__main__':
 	# setup logger
-	logging.getLogger().setLevel(logging.INFO)
+	logging.getLogger().setLevel(logging.DEBUG)
 
         # parse args
         parser = argparse.ArgumentParser(description='Train a Grasp Quality Convolutional Neural Network with TensorFlow')
@@ -299,7 +299,8 @@ if __name__ == '__main__':
 
 	# Training from Scratch
 	start_time = time.time()
-	gqcnn = GQCNN(gqcnn_config)
+	gqcnn = GQCNNColor(gqcnn_config)
+	logging.info("gqcnn initialized, initializing SGD")
 	sgdOptimizer = SGDOptimizer(gqcnn, train_config)
 	with gqcnn.get_tf_graph().as_default():
 	    sgdOptimizer.optimize()

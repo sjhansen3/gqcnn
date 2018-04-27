@@ -75,6 +75,7 @@ class GQCNN(object):
             python dictionary of configuration parameters such as architecure and basic data params such as batch_size for prediction,
             im_height, im_width, ...
         """
+        logging.info("initializing gqcnn *******")
         self._sess = None
         self._graph = tf.Graph()
         self._parse_config(config)
@@ -245,6 +246,8 @@ class GQCNN(object):
             if reinit_fc3:
                 fc3_std = np.sqrt(2.0 / (self.fc3_in_size))
                 self._weights.fc3W = tf.Variable(tf.truncated_normal([self.fc3_in_size, self.fc3_out_size], stddev=fc3_std))
+                logging.info("_weights.fc3W initialized with truncated normal in reinitialize {}".format(self.fc3_in_size))
+
                 self._weights.fc3b = tf.Variable(tf.truncated_normal([self.fc3_out_size], stddev=fc3_std))  
             if reinit_fc4:
                 fc4_std = np.sqrt(2.0 / (self.fc4_in_size))
@@ -255,7 +258,8 @@ class GQCNN(object):
                 fc5_std = np.sqrt(2.0 / (self.fc5_in_size))
                 self._weights.fc5W = tf.Variable(tf.truncated_normal([self.fc5_in_size, self.fc5_out_size], stddev=fc5_std))
                 self._weights.fc5b = tf.Variable(tf.constant(0.0, shape=[self.fc5_out_size]))
-        def init_weights_gaussian(self):
+   
+    def init_weights_gaussian(self):
         """ Initializes weights for network from scratch using Gaussian Distribution """
 
         # init pool size variables
@@ -363,9 +367,13 @@ class GQCNN(object):
         fc3_in_size = conv2_2_size
         if use_conv3:
             fc3_in_size = conv3_2_size
+            #TODO change this in the color version
+        logging.info("fc3_in_size = conv2_2_size {} reset to conv2_2_size in init_weights_gaussian line 370".format(fc3_in_size))
         fc3_out_size = cfg['fc3']['out_size']
         fc3_std = np.sqrt(2.0 / fc3_in_size)
         fc3W = tf.Variable(tf.truncated_normal([fc3_in_size, fc3_out_size], stddev=fc3_std), name='fc3W')
+        logging.info("fc3_in_size{}, fc3_out_size{} in init_weights gaussian line 375".format(fc3_in_size, fc3_out_size))
+
         fc3b = tf.Variable(tf.truncated_normal([fc3_out_size], stddev=fc3_std), name='fc3b')
 
         # pc1
@@ -484,7 +492,10 @@ class GQCNN(object):
         self.pc2_out_size = self._architecture['pc2']['out_size']
         self.pc1_in_size = self._pose_dim
         self.pc1_out_size = self._architecture['pc1']['out_size']
-        self.fc3_in_size = self._architecture['pc2']['out_size']
+        self.fc3_in_size = 3000000000 #TODO this variable is overwritten by a call in init_weights_gaussian
+
+        logging.info("self.fc3_in_size set on line 493 in neural_networks.py{}".format(self.fc3_in_size))
+
         self.fc3_out_size = self._architecture['fc3']['out_size']
         self.fc4_in_size = self._architecture['fc3']['out_size']
         self.fc4_out_size = self._architecture['fc4']['out_size'] 
@@ -917,6 +928,8 @@ class GQCNN(object):
                 conv3_2_num_nodes = reduce_shape(pool3_2.get_shape())
                 conv3_2_flat = tf.reshape(pool3_2, [-1, conv3_2_num_nodes])
 
+
+
         # fc3
         if self._use_conv3:
                 fc3 = tf.nn.relu(tf.matmul(conv3_2_flat, self._weights.fc3W) +
@@ -932,7 +945,13 @@ class GQCNN(object):
         # pc1
         pc1 = tf.nn.relu(tf.matmul(input_pose_node, self._weights.pc1W) +
                         self._weights.pc1b)
+        logging.info("conv3_2_flat size {}".format(conv2_2_flat.shape))
+        logging.info("self._weights.fc3W size {}".format(self._weights.fc3W))
+        # logging.info("self._use_conv3 {}".format(self._use_conv3))
 
+        # logging.info("self._use_pc2: {}".format(self._use_pc2))
+        logging.info("pc1: {}".format(pc1.shape))
+        # logging.info("self._weights.pc2W: {}".format(self._weights.pc2W.shape))
         if self._use_pc2:
                 # pc2
                 pc2 = tf.nn.relu(tf.matmul(pc1, self._weights.pc2W) +

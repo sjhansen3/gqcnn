@@ -77,6 +77,7 @@ class GQCNNColor:
         self._sess = None
         self._graph = tf.Graph()
         self._parse_config(config)
+        logging.info("GQCNNColor initialized")
 
     @staticmethod
     def load(model_dir):
@@ -92,13 +93,6 @@ class GQCNNColor:
         :obj:`GQCNN`
             GQCNN object initialized with the weights and architecture found in the specified model directory
         """
-        #TODO set this with keras? as below
-        from keras.models import model_from_json
-
-        json_string = model.to_json()
-        model = model_from_json(json_string)
-        #TODO
-
         # get config dict with architecture and other basic configurations for GQCNN from config.json in model directory
         config_file = os.path.join(model_dir, 'config.json')
         with open(config_file) as data_file:    
@@ -107,7 +101,7 @@ class GQCNNColor:
         gqcnn_config = train_config['gqcnn_config']
 
         # create GQCNN object and initialize weights and network
-        gqcnn = GQCNN(gqcnn_config)
+        gqcnn = GQCNNColor(gqcnn_config)
         gqcnn.init_weights_file(os.path.join(model_dir, 'model.ckpt'))
         training_mode = train_config['training_mode']
         if training_mode == TrainingMode.CLASSIFICATION:
@@ -190,23 +184,7 @@ class GQCNNColor:
 
             # create empty weight object
             self._weights = GQCnnWeights()
-
-            # read in conv1 & conv2
-            self._weights.conv1_1W = tf.Variable(reader.get_tensor("conv1_1W"))
-            self._weights.conv1_1b = tf.Variable(reader.get_tensor("conv1_1b"))
-            self._weights.conv1_2W = tf.Variable(reader.get_tensor("conv1_2W"))
-            self._weights.conv1_2b = tf.Variable(reader.get_tensor("conv1_2b"))
-            self._weights.conv2_1W = tf.Variable(reader.get_tensor("conv2_1W"))
-            self._weights.conv2_1b = tf.Variable(reader.get_tensor("conv2_1b"))
-            self._weights.conv2_2W = tf.Variable(reader.get_tensor("conv2_2W"))
-            self._weights.conv2_2b = tf.Variable(reader.get_tensor("conv2_2b"))
-
-            # if conv3 is to be used, read in conv3
-            if self._use_conv3:
-                self._weights.conv3_1W = tf.Variable(reader.get_tensor("conv3_1W"))
-                self._weights.conv3_1b = tf.Variable(reader.get_tensor("conv3_1b"))
-                self._weights.conv3_2W = tf.Variable(reader.get_tensor("conv3_2W"))
-                self._weights.conv3_2b = tf.Variable(reader.get_tensor("conv3_2b"))
+            #TODO inititialize the weights in the keras object as well, for now the VGG net is only ever intialized and frozen
 
             # read in pc1
             self._weights.pc1W = tf.Variable(reader.get_tensor("pc1W"))
@@ -242,7 +220,6 @@ class GQCNNColor:
 
         """ Initializes weights for network from scratch using Gaussian Distribution 
         """
-        pass
         with self._graph.as_default():
             if reinit_pc1:
                 pc1_std = np.sqrt(2.0 / self.pc1_in_size)
@@ -267,7 +244,88 @@ class GQCNNColor:
     
     def init_weights_gaussian(self):
         """ Initializes weights for network from scratch using Gaussian Distribution """
-        #TODO check assumption, the weights are automatically intiialized as gaussian in 
+        
+        # init pool size variables
+        cfg = self._architecture
+        
+        # load and intitialze VGG model for fine tuning image data
+        self._base_model = tf.keras.applications.VGG19(
+            include_top=False,
+            weights='imagenet',
+            input_tensor=None,
+            input_shape=(64,64,3),
+            pooling=None,
+            classes=1000
+        )
+        #multiply the tensor shape together e.g. (512,512,2) = 512*512*2 to get output size when flattened
+        vgg_output_size = reduce(lambda x,y: x*y, [i.value for i in self._base_model.output.shape if i.value is not None])
+
+        # fc3
+        fc3_in_size = vgg_output_size #TODO change this in the color version
+        logging.info("fc3_in_size = conv2_2_size {} reset to conv2_2_size in init_weights_gaussian line 370".format(fc3_in_size))
+        fc3_out_size = cfg['fc3']['out_size']
+        fc3_std = np.sqrt(2.0 / fc3_in_size)
+        fc3W = tf.Variable(tf.truncated_normal([fc3_in_size, fc3_out_size], stddev=fc3_std), name='fc3W')
+        logging.info("fc3_in_size{}, fc3_out_size{} in init_weights gaussian line 375".format(fc3_in_size, fc3_out_size))
+
+        fc3b = tf.Variable(tf.truncated_normal([fc3_out_size], stddev=fc3_std), name='fc3b')
+
+        # pc1
+        pc1_in_size = self._pose_dim
+        pc1_out_size = cfg['pc1']['out_size']
+
+        pc1_std = np.sqrt(2.0 / pc1_in_size)
+        pc1W = tf.Variable(tf.truncated_normal([pc1_in_size, pc1_out_size],
+                                               stddev=pc1_std), name='pc1W')
+        pc1b = tf.Variable(tf.truncated_normal([pc1_out_size],
+                                               stddev=pc1_std), name='pc1b')
+
+        # pc2
+        pc2_in_size = pc1_out_size
+        pc2_out_size = cfg['pc2']['out_size']
+
+        if pc2_out_size > 0:
+            pc2_std = np.sqrt(2.0 / pc2_in_size)
+            pc2W = tf.Variable(tf.truncated_normal([pc2_in_size, pc2_out_size],
+                                                   stddev=pc2_std), name='pc2W')
+            pc2b = tf.Variable(tf.truncated_normal([pc2_out_size],
+                                                   stddev=pc2_std), name='pc2b')
+
+        # fc4
+        fc4_im_in_size = fc3_out_size
+        if pc2_out_size == 0:
+            fc4_pose_in_size = pc1_out_size
+        else:
+            fc4_pose_in_size = pc2_out_size
+        fc4_out_size = cfg['fc4']['out_size']
+        fc4_std = np.sqrt(2.0 / (fc4_im_in_size + fc4_pose_in_size))
+        fc4W_im = tf.Variable(tf.truncated_normal([fc4_im_in_size, fc4_out_size], stddev=fc4_std), name='fc4W_im')
+        fc4W_pose = tf.Variable(tf.truncated_normal([fc4_pose_in_size, fc4_out_size], stddev=fc4_std), name='fc4W_pose')
+        fc4b = tf.Variable(tf.truncated_normal([fc4_out_size], stddev=fc4_std), name='fc4b')
+
+        # fc5
+        fc5_in_size = fc4_out_size
+        fc5_out_size = cfg['fc5']['out_size']
+        fc5_std = np.sqrt(2.0 / (fc5_in_size))
+        fc5W = tf.Variable(tf.truncated_normal([fc5_in_size, fc5_out_size], stddev=fc5_std), name='fc5W')
+        fc5b = tf.Variable(tf.constant(0.0, shape=[fc5_out_size]), name='fc5b')
+
+        # create empty weight object and fill it up
+        self._weights = GQCnnWeights()
+
+        self._weights.fc3W = fc3W
+        self._weights.fc3b = fc3b
+        self._weights.fc4W_im = fc4W_im
+        self._weights.fc4W_pose = fc4W_pose
+        self._weights.fc4b = fc4b
+        self._weights.fc5W = fc5W
+        self._weights.fc5b = fc5b
+        self._weights.pc1W = pc1W
+        self._weights.pc1b = pc1b
+
+        if pc2_out_size > 0:
+            self._weights.pc2W = pc2W
+            self._weights.pc2b = pc2b
 
     def _parse_config(self, config):
         """ Parses configuration file for this GQCNN 
@@ -597,7 +655,8 @@ class GQCNNColor:
             close_sess = True
             self.open_session()
 
-        filters = self._sess.run(self._weights.conv1_1W)
+        #TODO check to make sure this works
+        filters = self._sess.run(self._base_model.layers[1].weights[0])
 
         if close_sess:
             self.close_session()
@@ -626,28 +685,16 @@ class GQCNNColor:
         :obj:`tensorflow Tensor`
             output of network
         """
-        # Construct VGG model
-        base_model = tf.keras.applications.VGG19(
-            include_top=False,
-            weights='imagenet',
-            input_tensor=None,
-            input_shape=(64,64,3),
-            pooling=None,
-            classes=1000
-        )
-        # base_model.trainable = False
-        # for layer in base_model.layers:
-        #     layer.trainable = False
-        #     # print layer.trainable_variables
-        #     # print layer.trainable_variables
         
         # add a global spatial average pooling layer
-        base_out = base_model(input_im_node)
+        base_out = self._base_model(input_im_node)
         base_out_num_nodes = reduce_shape(base_out.get_shape())
 
         #TODO define num_nodes for base_out
         base_out_flat = tf.reshape(base_out, [-1, base_out_num_nodes])
 
+        logging.info("base_out_flat shape {}".format(base_out_flat.shape))
+        logging.info("self._weights.fc3W {}".format(self._weights.fc3W.shape))
         # fc3
         fc3 = tf.nn.relu(tf.matmul(base_out_flat, self._weights.fc3W) +
                         self._weights.fc3b)

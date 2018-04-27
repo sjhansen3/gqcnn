@@ -73,6 +73,7 @@ class SGDOptimizer(object):
 		self.gqcnn = gqcnn
 		self.cfg = config
 		self.tensorboard_has_launched = False
+		logging.info("SGD optimizer starting ******")
 
 	def _create_loss(self):
 		""" Creates a loss based on config file
@@ -166,8 +167,11 @@ class SGDOptimizer(object):
 		
 		# build training and validation networks
 		with tf.name_scope('validation_network'):
+			logging.info("loading validation network")
 			self.gqcnn.initialize_network() # builds validation network inside gqcnn class
 		with tf.name_scope('training_network'):
+			#TODO get rid of private method call
+			logging.info("loading training network")
 			self.train_net_output = self.gqcnn._build_network(self.input_im_node, self.input_pose_node, drop_fc3, drop_fc4, fc3_drop_rate , fc4_drop_rate)
 
 		# form loss
@@ -205,6 +209,8 @@ class SGDOptimizer(object):
 			var_list = [v for k, v in self.weights.__dict__.iteritems() if k.find('conv') == -1]
 		elif self.cfg['fine_tune'] and self.cfg['update_conv0_only'] and self.use_conv0:
 			var_list = [v for k, v in self.weights.__dict__.iteritems() if k.find('conv0') > -1]
+		
+		logging.debug("Variables which gradients will be applied to {}".format(var_list))
 
 		# create optimizer
 		with tf.name_scope('optimizer'):
@@ -270,17 +276,17 @@ class SGDOptimizer(object):
 				self._check_dead_queue()
 
 				# run optimization
-				_, l, lr, predictions, batch_labels, output, train_images, conv1_1W, conv1_1b, pose_node = self.sess.run(
-						[optimizer, loss, learning_rate, train_predictions, self.train_labels_node, self.train_net_output, self.input_im_node, self.weights.conv1_1W, self.weights.conv1_1b, self.input_pose_node], options=GeneralConstants.timeout_option)
+				_, l, lr, predictions, batch_labels, output, train_images, pose_node = self.sess.run(
+						[optimizer, loss, learning_rate, train_predictions, self.train_labels_node, self.train_net_output, self.input_im_node, self.input_pose_node], options=GeneralConstants.timeout_option)
 
 				ex = np.exp(output - np.tile(np.max(output, axis=1)[:,np.newaxis], [1,2]))
 				softmax = ex / np.tile(np.sum(ex, axis=1)[:,np.newaxis], [1,2])
 				
-				logging.debug('Max ' +  str(np.max(softmax[:,1])))
-				logging.debug('Min ' + str(np.min(softmax[:,1])))
-				logging.debug('Pred nonzero ' + str(np.sum(np.argmax(predictions, axis=1))))
-				logging.debug('True nonzero ' + str(np.sum(batch_labels)))
-
+				logging.info('Max ' +  str(np.max(softmax[:,1])))
+				logging.info('Min ' + str(np.min(softmax[:,1])))
+				logging.info('Pred nonzero ' + str(np.sum(np.argmax(predictions, axis=1))))
+				logging.info('True nonzero ' + str(np.sum(batch_labels)))
+				logging.info("step {}".format(step))
 				# log output
 				if step % self.log_frequency == 0:
 					elapsed_time = time.time() - start_time
@@ -293,39 +299,47 @@ class SGDOptimizer(object):
 					if self.training_mode == TrainingMode.CLASSIFICATION:
 						train_error = ClassificationResult([predictions], [batch_labels]).error_rate
 						logging.info('Minibatch error: %.3f%%' %train_error)
+					
+					logging.info("just before the summary writer")
 					self.summary_writer.add_summary(self.sess.run(self.merged_log_summaries, feed_dict={self.minibatch_error_placeholder: train_error, self.minibatch_loss_placeholder: l, self.learning_rate_placeholder: lr}), step)
 					sys.stdout.flush()
-
+					logging.info("got past the summary writer")
 					# update the TrainStatsLogger
 					self.train_stats_logger.update(train_eval_iter=step, train_loss=l, train_error=train_error, total_train_error=None, val_eval_iter=None, val_error=None, learning_rate=lr)
 
 				# evaluate validation error
 				if step % self.eval_frequency == 0:
+					logging.info("step {}".format(step))
+					logging.info("313 {}".format(self.cfg['eval_total_train_error']))
 					if self.cfg['eval_total_train_error']:
 						train_error = self._error_rate_in_batches()
 						logging.info('Training error: %.3f' %train_error)
-
+						logging.info("line 216")
 						# update the TrainStatsLogger and save
 						self.train_stats_logger.update(train_eval_iter=None, train_loss=None, train_error=None, total_train_error=train_error, val_eval_iter=None, val_error=None, learning_rate=None)
 						self.train_stats_logger.log()
-
+						logging.info("line 320")
+					logging.info("line 321")
 					val_error = self._error_rate_in_batches()
 					self.summary_writer.add_summary(self.sess.run(self.merged_eval_summaries, feed_dict={self.val_error_placeholder: val_error}), step)
 					logging.info('Validation error: %.3f' %val_error)
 					sys.stdout.flush()
 
+					logging.info("line 326")
 					# update the TrainStatsLogger
 					self.train_stats_logger.update(train_eval_iter=None, train_loss=None, train_error=None, total_train_error=None, val_eval_iter=step, val_error=val_error, learning_rate=None)
 
 					# save everything!
 					self.train_stats_logger.log()
-				
+
+				logging.info("save model")
 				# save the model
 				if step % self.save_frequency == 0 and step > 0:
 					self.saver.save(self.sess, os.path.join(self.experiment_dir, 'model_%05d.ckpt' %(step)))
 					self.saver.save(self.sess, os.path.join(self.experiment_dir, 'model.ckpt'))
 
-
+				logging.info("just before tensorboard")
+				logging.info("self.tensorboard_has_launched {}".format(self.tensorboard_has_launched))
 				# launch tensorboard only after the first iteration
 				if not self.tensorboard_has_launched:
 					self.tensorboard_has_launched = True
@@ -399,6 +413,8 @@ class SGDOptimizer(object):
 			sliced pose_data corresponding to input data mode
 		"""
 		if input_data_mode == InputDataMode.TF_IMAGE:
+			# logging.info("pose array: {}".format(pose_arr))
+			# logging.info("np.reshape(pose_arr,(-1,1)) {}".format(np.reshape(pose_arr,(-1,1))))
 			return pose_arr[:,2:3]
 		elif input_data_mode == InputDataMode.TF_IMAGE_PERSPECTIVE:
 			return np.c_[pose_arr[:,2:3], pose_arr[:,4:6]]
@@ -462,6 +478,7 @@ class SGDOptimizer(object):
 			try:
 				self.weights = self.gqcnn.get_weights()
 			except:
+				logging.warn('get_weights() threw an exception: initializing GQCNN weights with gaussian random variables')
 				self.gqcnn.init_weights_gaussian()                
 
 			# this assumes that a gqcnn was passed in that was initialized with weights from a model using GQCNN.load(), so all that has to
@@ -614,7 +631,7 @@ class SGDOptimizer(object):
 	def _compute_indices_image_wise(self):
 		""" Compute train and validation indices based on an image-wise split"""
 		# make a map of the train and test indices for each file
-		logging.info('Computing indices image-wise')
+		logging.info("Computing indices image-wise")
                 if 'splits' in self.cfg.keys():
                         train_index_map_filename = self.cfg['splits']['training']
                         val_index_map_filename = self.cfg['splits']['validation']
@@ -1085,8 +1102,14 @@ class SGDOptimizer(object):
 
 				# enqueue training data batch
 				train_data[start_i:end_i, ...] = np.copy(self.train_data_arr)
+				
+				# logging.info("start_i {}".format(start_i))
+				# logging.info("end_i {}".format(end_i))
+				# logging.info("self._read_pose_data(np.copy(self.train_poses_arr), self.input_data_mode) {}".format(self._read_pose_data(np.copy(self.train_poses_arr), self.input_data_mode)))
+				
 				train_poses[start_i:end_i,:] = self._read_pose_data(np.copy(self.train_poses_arr), self.input_data_mode)
 				label_data[start_i:end_i] = np.copy(self.train_label_arr)
+				
 
 				del self.train_data_arr
 				del self.train_poses_arr
@@ -1252,12 +1275,16 @@ class SGDOptimizer(object):
 		: float
 			validation error
 		"""
+		logging.info("error rate in batches")
 		error_rates = []
 		self.im_filenames.sort(key = lambda x: int(x[-9:-4]))
 		self.pose_filenames.sort(key = lambda x: int(x[-9:-4]))
 		self.label_filenames.sort(key = lambda x: int(x[-9:-4]))
 
+		logging.info("image file names {}".format(self.im_filenames))
+		# logging.info("pose_filenames {}")
 		for data_filename, pose_filename, label_filename in zip(self.im_filenames, self.pose_filenames, self.label_filenames):
+			logging.info("for loop to calculate error rate")
 			# load next file
 			data = np.load(os.path.join(self.data_dir, data_filename))['arr_0']
 			poses = np.load(os.path.join(self.data_dir, pose_filename))['arr_0']
@@ -1291,6 +1318,6 @@ class SGDOptimizer(object):
 		del data
 		del poses
 		del labels
-
+		logging.info("leaving error rate")
 		# return average error rate over all files (assuming same size)
 		return np.mean(error_rates)

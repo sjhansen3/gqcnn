@@ -24,6 +24,7 @@ from .optimizer_constants import ImageMode, TrainingMode, PreprocMode, InputData
 from .train_stats_logger import TrainStatsLogger
 from .learning_analysis import ClassificationResult, RegressionResult, ConfusionMatrix
 
+from .color_neural_network import GQCNNColor
 from .neural_networks import GQCNN
 from .sgd_optimizer import SGDOptimizer
 from .gqcnn_analyzer import GQCNNAnalyzer
@@ -36,6 +37,7 @@ from .policy import Policy, GraspingPolicy, AntipodalGraspingPolicy, CrossEntrop
 from .gqcnn_prediction_visualizer import GQCNNPredictionVisualizer
 
 __all__ = ['GQCNN', 
+            'GQCNNColor',
            'SGDOptimizer',
            'GQCNNAnalyzer',
            'ImageMode', 'TrainingMode', 'PreprocMode', 'InputDataMode',
